@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, app: 'spreetree-expenses' });
+  res.json({ ok: true, app: 'split-expenses' });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -434,7 +434,7 @@ function money(value) {
 }
 
 function hashPassword(password) {
-  return createHash('sha256').update(`spreetree:${password}`).digest('hex');
+  return createHash('sha256').update(`split:${password}`).digest('hex');
 }
 
 function cleanAndFormatName(rawName) {
@@ -459,11 +459,11 @@ app.listen(port, async () => {
   try {
     const db = await getDb();
     await seedGroup(db);
-    console.log(`Spreetree API listening on http://127.0.0.1:${port}`);
+    console.log(`Split API listening on http://127.0.0.1:${port}`);
   } catch (err) {
     console.error('\n❌ DATABASE CONNECTION ERROR:');
     console.error('Could not connect to MongoDB. The server is listening, but database actions will fail.');
     console.error('Please configure a valid MONGODB_URI in your .env file or start MongoDB locally on port 27017.\n');
-    console.log(`Spreetree API listening on http://127.0.0.1:${port} (DATABASE OFFLINE)`);
+    console.log(`Split API listening on http://127.0.0.1:${port} (DATABASE OFFLINE)`);
   }
 });

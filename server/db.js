@@ -5,7 +5,7 @@ let isConnected = false;
 
 export async function getDb() {
   if (!isConnected) {
-    const mongodbUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/spreetree';
+    const mongodbUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/split';
     try {
       await mongoose.connect(mongodbUri);
       isConnected = true;
@@ -21,7 +21,7 @@ export async function getDb() {
 export async function seedGroup(database) {
   await getDb();
 
-  const groupName = 'Spreetree Flat';
+  const groupName = 'Split Flat';
   let group = await Group.findOne({ name: groupName });
   if (group) return group._id;
 

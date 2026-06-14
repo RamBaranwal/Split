@@ -24,7 +24,7 @@ import './styles.css';
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:4000';
 
 function App() {
-  const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('spreetree-session') || 'null'));
+  const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('split-session') || 'null'));
   const [groups, setGroups] = useState([]);
   const [groupId, setGroupId] = useState('');
   const [members, setMembers] = useState([]);
@@ -121,7 +121,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.get('email'), password: form.get('password'), name: form.get('name') || 'Demo User' })
       });
-      localStorage.setItem('spreetree-session', JSON.stringify(data));
+      localStorage.setItem('split-session', JSON.stringify(data));
       setSession(data);
       showNotice('Logged in successfully!');
     } catch (e) {
@@ -130,7 +130,7 @@ function App() {
   }
 
   function handleLogout() {
-    localStorage.removeItem('spreetree-session');
+    localStorage.removeItem('split-session');
     setSession(null);
   }
 
@@ -340,7 +340,7 @@ function App() {
           <p>Register or log in with any email and password credentials to instantiate a session connected to MongoDB.</p>
           <form onSubmit={handleLogin}>
             <label>Name<input name="name" defaultValue="Evaluator" placeholder="Name" /></label>
-            <label>Email<input name="email" type="email" defaultValue="evaluator@spreetree.test" placeholder="email@address.com" required /></label>
+            <label>Email<input name="email" type="email" defaultValue="evaluator@split.test" placeholder="email@address.com" required /></label>
             <label>Password<input name="password" type="password" defaultValue="password123" placeholder="••••••••" required /></label>
             <button className="btn" type="submit"><LogIn size={18} /> Sign in</button>
           </form>
@@ -355,7 +355,7 @@ function App() {
       <aside className="sidebar">
         <div>
           <div className="brand">
-            <span className="eyebrow">Spreetree Expenses</span>
+            <span className="eyebrow">Split Expenses</span>
             <h1>MERN Dashboard</h1>
           </div>
           
