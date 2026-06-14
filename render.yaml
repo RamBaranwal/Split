@@ -6,8 +6,5 @@ services:
     buildCommand: npm install
     startCommand: npm run server:start
     envVars:
-      - key: MONGODB_URI
-        sync: false
-        description: "MongoDB Atlas cluster connection string (e.g. mongodb+srv://...)"
       - key: PORT
         value: 4000

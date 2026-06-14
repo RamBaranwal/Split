@@ -17,7 +17,8 @@ import {
   UserCheck, 
   Info,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import './styles.css';
 
@@ -46,6 +47,45 @@ function App() {
   // Add Member state
   const [isAddingMember, setIsAddingMember] = useState(false);
   const [newAliasValue, setNewAliasValue] = useState({});
+
+  // Advanced manual splitting states
+  const [manualSplitType, setManualSplitType] = useState('equal');
+  const [selectedSplitMembers, setSelectedSplitMembers] = useState([]);
+  const [manualSplitValues, setManualSplitValues] = useState({});
+
+  // Selected Expense details drawer state
+  const [selectedExpense, setSelectedExpense] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+
+  // Auto-select members for splitting by default when group loads
+  useEffect(() => {
+    setSelectedSplitMembers(members.map(m => m.name));
+    setManualSplitValues({});
+  }, [members]);
+
+  // Handle invitation link query param on startup
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteId = params.get('invite');
+    if (inviteId) {
+      setGroupId(inviteId);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      showNotice('Joined group via invite link!');
+    }
+  }, []);
+
+  // Poll comments for real-time chat updates
+  useEffect(() => {
+    if (!selectedExpense) return;
+    loadComments(selectedExpense.id);
+    
+    const interval = setInterval(() => {
+      loadComments(selectedExpense.id);
+    }, 4000);
+    
+    return () => clearInterval(interval);
+  }, [selectedExpense]);
 
   useEffect(() => {
     loadGroups();
@@ -81,6 +121,30 @@ function App() {
       setGroupId(String(data.group.id || data.group._id));
       showNotice(`Successfully created group "${data.group.name}"!`);
       setActiveTab('members');
+    } catch (e) {
+      showNotice(e.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteGroup() {
+    const currentGroup = groups.find(g => String(g.id) === String(groupId));
+    if (!currentGroup) return;
+    if (!confirm(`Are you sure you want to delete the group "${currentGroup.name}" and all of its members, expenses, and settlements? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      setBusy(true);
+      await api(`/api/groups/${groupId}`, { method: 'DELETE' });
+      showNotice(`Successfully deleted group "${currentGroup.name}".`);
+      const updatedGroups = groups.filter(g => String(g.id) !== String(groupId));
+      setGroups(updatedGroups);
+      if (updatedGroups.length > 0) {
+        setGroupId(String(updatedGroups[0].id));
+      } else {
+        await loadGroups();
+      }
     } catch (e) {
       showNotice(e.message, 'error');
     } finally {
@@ -168,7 +232,8 @@ function App() {
 
   async function handleAddMember(event) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
     try {
       await api(`/api/groups/${groupId}/members`, {
         method: 'POST',
@@ -179,7 +244,7 @@ function App() {
           leaveDate: form.get('leaveDate') || null 
         })
       });
-      event.currentTarget.reset();
+      formEl.reset();
       setIsAddingMember(false);
       await refreshGroup(groupId);
       showNotice('Added new member successfully!');
@@ -201,6 +266,44 @@ function App() {
       setBusy(false);
     }
   }
+
+  function handleInviteMember() {
+    const inviteUrl = `${window.location.origin}/?invite=${groupId}`;
+    navigator.clipboard.writeText(inviteUrl);
+    alert(`Invite link for this group copied to clipboard:\n\n${inviteUrl}\n\nSend this link to invite users to this group!`);
+  }
+
+  async function loadComments(expenseId) {
+    try {
+      const data = await api(`/api/expenses/${expenseId}/comments`);
+      setComments(data.comments);
+    } catch (e) {
+      console.error('Failed to load comments:', e);
+    }
+  }
+
+  async function handlePostComment(event) {
+    event.preventDefault();
+    if (!newComment.trim()) return;
+    try {
+      const data = await api(`/api/expenses/${selectedExpense.id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: session.user.name,
+          message: newComment.trim()
+        })
+      });
+      setNewComment('');
+      setComments(prev => [...prev, data.comment]);
+    } catch (e) {
+      showNotice(e.message, 'error');
+    }
+  }
+
+  const handleSplitValueChange = (memberName, val) => {
+    setManualSplitValues(prev => ({ ...prev, [memberName]: val }));
+  };
 
   async function handleAddAlias(memberId, currentAliases) {
     const rawVal = newAliasValue[memberId] || '';
@@ -248,21 +351,60 @@ function App() {
 
   async function handleAddManualExpense(event) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
     const date = form.get('expenseDate');
     const desc = form.get('description');
     const payer = form.get('paidBy');
     const amount = Number(form.get('amountInr'));
     
-    // Split equally among checked members
-    const checked = members.filter(m => form.get(`share-${m.name}`) === 'on');
-    if (!checked.length) return showNotice('Select at least one participant to split with.', 'error');
+    if (!selectedSplitMembers.length) {
+      return showNotice('Select at least one participant to split with.', 'error');
+    }
     
-    const shareAmount = Math.round((amount / checked.length) * 100) / 100;
-    const splits = checked.map(m => ({
-      member: m.name,
-      amountInr: shareAmount
-    }));
+    let splits = [];
+    if (manualSplitType === 'equal') {
+      const shareAmount = Math.round((amount / selectedSplitMembers.length) * 100) / 100;
+      splits = selectedSplitMembers.map(name => ({
+        member: name,
+        amountInr: shareAmount
+      }));
+    } else if (manualSplitType === 'unequal') {
+      let totalAssigned = 0;
+      splits = selectedSplitMembers.map(name => {
+        const val = Number(manualSplitValues[name] || 0);
+        totalAssigned += val;
+        return { member: name, amountInr: val };
+      });
+      if (Math.abs(totalAssigned - amount) > 0.01) {
+        return showNotice(`Total assigned split amounts (₹${totalAssigned}) must sum to the expense total (₹${amount}). Mismatch of ₹${Math.round((amount - totalAssigned)*100)/100}.`, 'error');
+      }
+    } else if (manualSplitType === 'percentage') {
+      let totalPercent = 0;
+      splits = selectedSplitMembers.map(name => {
+        const pct = Number(manualSplitValues[name] || 0);
+        totalPercent += pct;
+        const shareAmount = Math.round((amount * (pct / 100)) * 100) / 100;
+        return { member: name, amountInr: shareAmount };
+      });
+      if (Math.abs(totalPercent - 100) > 0.01) {
+        return showNotice(`Percentages must sum to 100%. Currently they sum to ${totalPercent}%.`, 'error');
+      }
+    } else if (manualSplitType === 'share') {
+      let totalShares = 0;
+      const sharesList = selectedSplitMembers.map(name => {
+        const sh = Number(manualSplitValues[name] || 1);
+        totalShares += sh;
+        return { member: name, share: sh };
+      });
+      if (totalShares <= 0) {
+        return showNotice('Total split shares ratio must be greater than zero.', 'error');
+      }
+      splits = sharesList.map(item => {
+        const shareAmount = Math.round((amount * (item.share / totalShares)) * 100) / 100;
+        return { member: item.member, amountInr: shareAmount };
+      });
+    }
 
     try {
       await api(`/api/groups/${groupId}/expenses`, {
@@ -273,14 +415,15 @@ function App() {
           description: desc,
           paidBy: payer,
           amountInr: amount,
-          splitType: 'equal',
+          splitType: manualSplitType,
           splits,
           notes: form.get('notes') || ''
         })
       });
-      event.currentTarget.reset();
+      formEl.reset();
+      setManualSplitValues({});
       await refreshGroup(groupId);
-      showNotice('Added manual expense to MongoDB!');
+      showNotice('Added manual expense successfully!');
     } catch (e) {
       showNotice(e.message, 'error');
     }
@@ -451,6 +594,15 @@ function App() {
                 >
                   <Plus size={18} />
                 </button>
+                <button 
+                  className="btn" 
+                  style={{ height: '42px', padding: '0 12px', minWidth: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-danger, #ef4444)', border: 'none', color: '#fff' }}
+                  onClick={handleDeleteGroup}
+                  title="Delete Current Group"
+                  type="button"
+                >
+                  <Trash2 size={18} />
+                </button>
               </div>
             </label>
 
@@ -562,42 +714,73 @@ function App() {
               <section className="panel">
                 <h2><Sparkles size={18} /> Interactive Debt Settlement Flowchart</h2>
                 <div className="settlement-flowchart">
-                  {simplifyDebtsList(balances).map((item) => (
-                    <div className="settlement-card" key={`${item.from}-${item.to}-${item.amountInr}`}>
-                      <div className="node-person debtor">
-                        <div className="node-avatar">{item.from.charAt(0)}</div>
-                        <span className="node-name">{item.from}</span>
-                      </div>
-                      
-                      <div className="flow-connector">
-                        <div className="flow-line-wrap">
-                          <div className="flow-line">
-                            <div className="flow-arrow"></div>
-                          </div>
+                  {(() => {
+                    const allDebts = simplifyDebtsList(balances);
+                    // Only show debts where the current logged-in user is the payer (they owe money)
+                    const myDebts = allDebts.filter(
+                      item => item.from.toLowerCase() === session?.user?.name?.toLowerCase()
+                    );
+                    if (!myDebts.length) {
+                      return (
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px 0' }}>
+                          {allDebts.length > 0
+                            ? `✅ You have no pending debts to settle! Others may still owe each other.`
+                            : `All shared expenses are fully settled! No pending transfers.`
+                          }
+                        </p>
+                      );
+                    }
+                    return myDebts.map((item) => (
+                      <div className="settlement-card" key={`${item.from}-${item.to}-${item.amountInr}`}>
+                        <div className="node-person debtor">
+                          <div className="node-avatar">{item.from.charAt(0)}</div>
+                          <span className="node-name">{item.from}</span>
                         </div>
-                        <span className="flow-amount">{formatCurrency(item.amountInr)}</span>
-                      </div>
+                        
+                        <div className="flow-connector">
+                          <div className="flow-line-wrap">
+                            <div className="flow-line">
+                              <div className="flow-arrow"></div>
+                            </div>
+                          </div>
+                          <span className="flow-amount">{formatCurrency(item.amountInr)}</span>
+                        </div>
 
-                      <div className="node-person creditor">
-                        <div className="node-avatar">{item.to.charAt(0)}</div>
-                        <span className="node-name">{item.to}</span>
-                      </div>
+                        <div className="node-person creditor">
+                          <div className="node-avatar">{item.to.charAt(0)}</div>
+                          <span className="node-name">{item.to}</span>
+                        </div>
 
-                      <button 
-                        className="btn-settle"
-                        disabled={busy}
-                        onClick={() => handleSettleDebt(item.from, item.to, item.amountInr)}
-                      >
-                        Settle
-                      </button>
-                    </div>
-                  ))}
-                  {!simplifyDebtsList(balances).length && (
-                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px 0' }}>
-                      All shared expenses are fully settled! No pending transfers.
-                    </p>
-                  )}
+                        <button 
+                          className="btn-settle"
+                          disabled={busy}
+                          onClick={() => handleSettleDebt(item.from, item.to, item.amountInr)}
+                        >
+                          Settle
+                        </button>
+                      </div>
+                    ));
+                  })()}
                 </div>
+                {/* Show a summary of what others owe you */}
+                {(() => {
+                  const allDebts = simplifyDebtsList(balances);
+                  const othersOweMe = allDebts.filter(
+                    item => item.to.toLowerCase() === session?.user?.name?.toLowerCase()
+                  );
+                  if (!othersOweMe.length) return null;
+                  return (
+                    <div style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '16px' }}>
+                      <h4 style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '10px', fontWeight: 600 }}>💰 People who owe you:</h4>
+                      {othersOweMe.map(item => (
+                        <div key={`owed-${item.from}-${item.to}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'rgba(16,185,129,0.07)', borderRadius: '8px', marginBottom: '6px', border: '1px solid rgba(16,185,129,0.15)' }}>
+                          <span style={{ fontWeight: 600 }}>{item.from}</span>
+                          <span style={{ color: 'var(--color-success)', fontWeight: 700 }}>owes you {formatCurrency(item.amountInr)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </section>
             </div>
           </div>
@@ -626,8 +809,11 @@ function App() {
                         const isHighlighted = highlightedRows.includes(expense.source_row);
                         return (
                           <tr 
-                            key={expense.id || expense._id}
+                            key={expense.id}
                             className={isHighlighted ? 'highlighted-row' : ''}
+                            onClick={() => setSelectedExpense(expense)}
+                            style={{ cursor: 'pointer' }}
+                            title="Click to view details, splits, and chat comments"
                           >
                             <td>{expense.source_row || '-'}</td>
                             <td>{expense.expense_date || '-'}</td>
@@ -638,6 +824,11 @@ function App() {
                               <span className={`badge ${expense.status}`}>
                                 {expense.status}
                               </span>
+                              {expense.commentCount > 0 && (
+                                <span className="badge accepted" style={{ marginLeft: '6px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: 'var(--color-primary)', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                                  💬 {expense.commentCount}
+                                </span>
+                              )}
                               {expense.status === 'needs_review' && expense.excluded_reason && (
                                 <div style={{ fontSize: '0.72rem', color: 'var(--color-warning)', marginTop: '4px', maxWidth: '240px', lineHeight: '1.3' }}>
                                   ⚠️ {expense.excluded_reason}
@@ -673,7 +864,7 @@ function App() {
                   </label>
                   <label>
                     Paid By
-                    <select name="paidBy">
+                    <select name="paidBy" defaultValue={members.find(m => m.name.toLowerCase() === session?.user?.name?.toLowerCase())?.name || (members[0]?.name || '')}>
                       {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                     </select>
                   </label>
@@ -681,16 +872,60 @@ function App() {
                     Amount (INR)
                     <input name="amountInr" type="number" step="0.01" min="0.01" placeholder="₹0.00" required />
                   </label>
+
+                  <label>
+                    Split Type
+                    <select name="splitType" value={manualSplitType} onChange={(e) => setManualSplitType(e.target.value)}>
+                      <option value="equal">Split Equally</option>
+                      <option value="unequal">Split Unequally (Exact Amounts)</option>
+                      <option value="percentage">Split by Percentage (%)</option>
+                      <option value="share">Split by Share (Ratio)</option>
+                    </select>
+                  </label>
                   
                   <label style={{ display: 'block' }}>
-                    Split With (Equal Split)
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px', maxHeight: '140px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '6px' }}>
-                      {members.map(m => (
-                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input type="checkbox" name={`share-${m.name}`} id={`chk-${m.name}`} defaultChecked />
-                          <label htmlFor={`chk-${m.name}`} style={{ cursor: 'pointer', margin: 0 }}>{m.name}</label>
-                        </div>
-                      ))}
+                    Split Share Details
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px', maxHeight: '160px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '6px' }}>
+                      {members.map(m => {
+                        const isChecked = selectedSplitMembers.includes(m.name);
+                        return (
+                          <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px', marginBottom: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input 
+                                type="checkbox" 
+                                id={`chk-${m.name}`} 
+                                checked={isChecked} 
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedSplitMembers(prev => [...prev, m.name]);
+                                  } else {
+                                    setSelectedSplitMembers(prev => prev.filter(name => name !== m.name));
+                                  }
+                                }}
+                              />
+                              <label htmlFor={`chk-${m.name}`} style={{ cursor: 'pointer', margin: 0 }}>{m.name}</label>
+                            </div>
+                            {isChecked && manualSplitType !== 'equal' && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '26px', marginTop: '4px' }}>
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                  {manualSplitType === 'unequal' && 'Amount (₹):'}
+                                  {manualSplitType === 'percentage' && 'Percentage (%):'}
+                                  {manualSplitType === 'share' && 'Shares (ratio):'}
+                                </span>
+                                <input 
+                                  type="number"
+                                  step="any"
+                                  style={{ height: '30px', width: '100px', fontSize: '0.85rem' }}
+                                  placeholder={manualSplitType === 'unequal' ? '0.00' : (manualSplitType === 'percentage' ? '0' : '1')}
+                                  value={manualSplitValues[m.name] || ''}
+                                  onChange={(e) => handleSplitValueChange(m.name, e.target.value)}
+                                  required
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </label>
 
@@ -713,9 +948,14 @@ function App() {
             <section className="panel" style={{ marginBottom: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2><UsersRound size={18} /> Active Members & Aliases</h2>
-                <button className="btn" onClick={() => setIsAddingMember(!isAddingMember)}>
-                  <Plus size={18} /> {isAddingMember ? 'Cancel' : 'Add Member'}
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn btn-secondary" onClick={handleInviteMember} style={{ display: 'flex', gap: '6px', alignItems: 'center' }} type="button">
+                    <Info size={16} /> Invite Member
+                  </button>
+                  <button className="btn" onClick={() => setIsAddingMember(!isAddingMember)}>
+                    <Plus size={18} /> {isAddingMember ? 'Cancel' : 'Add Member'}
+                  </button>
+                </div>
               </div>
 
               {isAddingMember && (
@@ -726,7 +966,7 @@ function App() {
                   </label>
                   <label style={{ flex: '1 1 150px' }}>
                     Join Date
-                    <input name="joinDate" type="date" required />
+                    <input name="joinDate" type="date" defaultValue={new Date().toISOString().split('T')[0]} required />
                   </label>
                   <label style={{ flex: '1 1 150px' }}>
                     Leave Date
@@ -1084,6 +1324,78 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Real-time Expense Chat & Splits Side Drawer */}
+      {selectedExpense && (
+        <div className="drawer-overlay" onClick={() => setSelectedExpense(null)}>
+          <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-header">
+              <h3>Expense Details</h3>
+              <button className="btn-close" onClick={() => setSelectedExpense(null)}>✕</button>
+            </div>
+            
+            <div className="drawer-body">
+              <div className="drawer-detail-card">
+                <span className={`badge ${selectedExpense.status}`} style={{ marginBottom: '8px' }}>{selectedExpense.status}</span>
+                <h4>{selectedExpense.description}</h4>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-primary)', marginTop: '6px' }}>
+                  {formatCurrency(selectedExpense.amount_inr)}
+                </div>
+                
+                <div className="drawer-meta-list" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                  <div><strong>Paid By:</strong> {selectedExpense.paid_by}</div>
+                  <div><strong>Date:</strong> {selectedExpense.expense_date}</div>
+                  {selectedExpense.notes && <div><strong>Notes:</strong> {selectedExpense.notes}</div>}
+                  {selectedExpense.source_row && <div><strong>CSV Row:</strong> {selectedExpense.source_row}</div>}
+                  <div><strong>Split Type:</strong> {selectedExpense.split_type}</div>
+                </div>
+              </div>
+
+              <div className="drawer-section">
+                <h5>Splits & Shares</h5>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px', marginTop: '8px' }}>
+                  {selectedExpense.shares?.map((s, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                      <span>{s.member_name}</span>
+                      <strong style={{ color: 'var(--text-main)' }}>{formatCurrency(s.amount_inr)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="drawer-section comment-section">
+                <h5>Real-time Chat Comments</h5>
+                <div className="comments-list" style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '250px', overflowY: 'auto', background: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', marginTop: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  {comments.map((c) => (
+                    <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(255,255,255,0.02)', padding: '8px', borderRadius: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                        <strong style={{ color: c.sender === session.user.name ? 'var(--color-primary)' : 'var(--color-success)' }}>{c.sender}</strong>
+                        <span style={{ color: 'var(--text-dark)' }}>{new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginTop: '2px', margin: 0, wordBreak: 'break-word' }}>{c.message}</p>
+                    </div>
+                  ))}
+                  {!comments.length && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center', margin: '12px 0' }}>No comments yet. Start the conversation below!</p>
+                  )}
+                </div>
+
+                <form onSubmit={handlePostComment} style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Ask a question or comment..."
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    style={{ height: '36px', fontSize: '0.85rem' }}
+                    required
+                  />
+                  <button className="btn" type="submit" style={{ height: '36px', padding: '0 12px' }}>Send</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -35,7 +35,7 @@ export function importExpenses(csvText, dbMembers = null) {
       name: m.name,
       joinDate: m.join_date,
       leaveDate: m.leave_date,
-      aliases: Array.isArray(m.aliases) ? m.aliases : []
+      aliases: typeof m.aliases === 'string' ? m.aliases.split(',') : (Array.isArray(m.aliases) ? m.aliases : [])
     }));
 
     const dynamicNormaliseName = (value) => {

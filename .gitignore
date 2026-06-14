@@ -4,3 +4,4 @@ dist/
 .data/
 server/.data/
 *.log
+*.sqlite
