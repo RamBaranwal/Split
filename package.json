@@ -1,0 +1,29 @@
+{
+  "name": "spreetree-expenses",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:server:dev\" \"npm:client:dev\"",
+    "server:dev": "node --watch server/index.js",
+    "server:start": "node server/index.js",
+    "client:dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node server/importer.test.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^10.0.3",
+    "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "lucide-react": "^0.561.0",
+    "mongoose": "^9.7.0",
+    "multer": "^2.0.2",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "vite": "^8.0.16"
+  }
+}
