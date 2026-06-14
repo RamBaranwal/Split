@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: spreetree-backend
+    name: split-backend
     env: node
     plan: free
     buildCommand: npm install

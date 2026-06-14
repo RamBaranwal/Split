@@ -1,6 +1,6 @@
-# Spreetree Shared Expenses
+# Split Shared Expenses
 
-A MERN-style full-stack expense app for the Spreetree assignment. It uses React, Node, and Express, with an embedded relational Postgres-compatible database through PGlite because the assignment explicitly requires relational databases only.
+A MERN-style full-stack expense app for the Split assignment. It uses React, Node, Express, and MongoDB.
 
 ## Features
 
